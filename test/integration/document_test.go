@@ -24,13 +24,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/yorkie-team/yorkie/client"
+
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/yorkie-team/yorkie/pkg/document"
 	"github.com/yorkie-team/yorkie/pkg/document/proxy"
-	"github.com/yorkie-team/yorkie/pkg/types"
 	"github.com/yorkie-team/yorkie/test/helper"
 )
 
@@ -179,8 +180,7 @@ func TestDocument(t *testing.T) {
 					}
 					assert.NoError(t, resp.Err)
 
-					if resp.EventType == types.DocumentsWatchedEvent ||
-						resp.EventType == types.DocumentsUnwatchedEvent {
+					if resp.EventType == client.PeersChanged {
 						assert.Equal(t, c2.Metadata(), resp.Publisher.Metadata)
 						wg.Done()
 					}
