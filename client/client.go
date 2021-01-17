@@ -50,6 +50,20 @@ var (
 	ErrDocumentNotAttached = errors.New("document is not attached")
 )
 
+type Metadata map[string]string
+
+type attachment struct {
+	document    *document.Document
+	peerClients map[string]Metadata
+}
+
+func newAttachment(doc *document.Document) *attachment {
+	return &attachment{
+		document:    doc,
+		peerClients: make(map[string]Metadata),
+	}
+}
+
 // Client is a normal client that can communicate with the agent.
 // It has documents and sends changes of the document in local
 // to the agent to synchronize with other replicas in remote.
@@ -58,11 +72,11 @@ type Client struct {
 	client     api.YorkieClient
 	dialOption grpc.DialOption
 
-	id           *time.ActorID
-	key          string
-	metadata     map[string]string
-	status       status
-	attachedDocs map[string]*document.Document
+	id            *time.ActorID
+	key           string
+	metadata      map[string]string
+	status        status
+	attachmentMap map[string]*attachment
 }
 
 // Option configures how we set up the client.
@@ -111,11 +125,11 @@ func NewClient(opts ...Option) (*Client, error) {
 	}
 
 	return &Client{
-		key:          k,
-		metadata:     metadata,
-		dialOption:   dialOption,
-		status:       deactivated,
-		attachedDocs: make(map[string]*document.Document),
+		key:           k,
+		metadata:      metadata,
+		dialOption:    dialOption,
+		status:        deactivated,
+		attachmentMap: make(map[string]*attachment),
 	}, nil
 }
 
@@ -242,7 +256,7 @@ func (c *Client) Attach(ctx context.Context, doc *document.Document) error {
 	}
 
 	doc.SetStatus(document.Attached)
-	c.attachedDocs[doc.Key().BSONKey()] = doc
+	c.attachmentMap[doc.Key().BSONKey()] = newAttachment(doc)
 
 	return nil
 }
@@ -258,7 +272,7 @@ func (c *Client) Detach(ctx context.Context, doc *document.Document) error {
 		return ErrClientNotActivated
 	}
 
-	if _, ok := c.attachedDocs[doc.Key().BSONKey()]; !ok {
+	if _, ok := c.attachmentMap[doc.Key().BSONKey()]; !ok {
 		return ErrDocumentNotAttached
 	}
 
@@ -287,7 +301,7 @@ func (c *Client) Detach(ctx context.Context, doc *document.Document) error {
 	}
 
 	doc.SetStatus(document.Detached)
-	delete(c.attachedDocs, doc.Key().BSONKey())
+	delete(c.attachmentMap, doc.Key().BSONKey())
 
 	return nil
 }
@@ -297,8 +311,8 @@ func (c *Client) Detach(ctx context.Context, doc *document.Document) error {
 // local documents.
 func (c *Client) Sync(ctx context.Context, keys ...*key.Key) error {
 	if len(keys) == 0 {
-		for _, doc := range c.attachedDocs {
-			keys = append(keys, doc.Key())
+		for _, attachment := range c.attachmentMap {
+			keys = append(keys, attachment.document.Key())
 		}
 	}
 
@@ -413,11 +427,12 @@ func (c *Client) sync(ctx context.Context, key *key.Key) error {
 		return ErrClientNotActivated
 	}
 
-	doc, ok := c.attachedDocs[key.BSONKey()]
+	attachment, ok := c.attachmentMap[key.BSONKey()]
 	if !ok {
 		return ErrDocumentNotAttached
 	}
 
+	doc := attachment.document
 	pbChangePack, err := converter.ToChangePack(doc.CreateChangePack())
 	if err != nil {
 		return err
